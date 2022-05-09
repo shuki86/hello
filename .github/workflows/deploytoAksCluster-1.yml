@@ -1,0 +1,50 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    
+    - uses: azure/docker-login@v1
+      with:
+        login-server: acrdemo1207.azurecr.io
+        username: ${{ secrets.acr_acrdemo1207_username }}
+        password: ${{ secrets.acr_acrdemo1207_password }}
+    
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/" -f  "Dockerfile" -t acrdemo1207.azurecr.io/akslab:${{ github.sha }} --label dockerfile-path=Dockerfile
+        docker push acrdemo1207.azurecr.io/akslab:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      with:
+         kubeconfig: ${{ secrets.aks_akslab_kubeConfig }}
+      id: login
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep akslab940f | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace akslab940f`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: akslab940f
+        container-registry-url: acrdemo1207.azurecr.io
+        container-registry-username: ${{ secrets.acr_acrdemo1207_username }}
+        container-registry-password: ${{ secrets.acr_acrdemo1207_password }}
+        secret-name: akslabdockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: akslab940f
+        manifests: |
+          manifests/deployment-7.yml
+          manifests/service-7.yml
+        images: |
+          acrdemo1207.azurecr.io/akslab:${{ github.sha }}
+        imagepullsecrets: |
+          akslabdockerauth
